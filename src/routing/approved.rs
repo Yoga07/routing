@@ -1105,7 +1105,9 @@ impl Approved {
 
         let mut commands = vec![];
 
-        if self.is_in_startup_phase() && peer.age() <= MIN_AGE {
+        let is_startup_phase = self.is_in_startup_phase();
+
+        if is_startup_phase && peer.age() <= MIN_AGE {
             // In startup phase, instantly relocate the joining peer in order to promote it to
             // adult.
 
@@ -1139,6 +1141,7 @@ impl Approved {
                 name: *peer.name(),
                 previous_name,
                 age: peer.age(),
+                startup_relocation: is_startup_phase,
             });
 
             self.print_network_stats();
