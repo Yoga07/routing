@@ -1414,6 +1414,10 @@ impl Approved {
             self.send_event(Event::Demoted);
         }
 
+        if self.node.age > 4 && !self.is_elder() {
+            self.send_event(Event::PromotedToAdult);
+        }
+
         if !new_is_elder {
             commands.extend(self.return_relocate_promise());
         }
