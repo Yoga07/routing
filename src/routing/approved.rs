@@ -1995,8 +1995,15 @@ impl Approved {
 
         match src {
             SrcLocation::Node(_) => {
+                // Fetch the latest know PublicKey if the given dst is a Section.
+                let dst_key = if let DstLocation::Section(name) = dst {
+                    self.network.key_by_name(&name).cloned()
+                } else {
+                    None
+                };
+
                 // If the source is a single node, we don't even need to vote, so let's cut this short.
-                let msg = Message::single_src(&self.node, dst, variant, None, None)?;
+                let msg = Message::single_src(&self.node, dst, variant, None, dst_key)?;
                 let mut commands = vec![];
 
                 if dst.contains(&self.node.name(), self.section.prefix()) {
