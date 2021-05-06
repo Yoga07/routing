@@ -327,6 +327,10 @@ impl Core {
                     *bounced_msg.clone(),
                 )?])
             }
+            Variant::SrcAhead => Ok(vec![]),
+            Variant::SrcOutdated => Ok(vec![]),
+            Variant::DstAhead(_chain) => Ok(vec![]),
+            Variant::DstOutdated => Ok(vec![]),
             Variant::BouncedUnknownMessage { src_key, message } => {
                 let sender = sender.ok_or(Error::InvalidSrcLocation)?;
                 self.handle_bounced_unknown_message(
@@ -416,26 +420,26 @@ impl Core {
 
     pub(crate) fn handle_other_section(
         &self,
-        section_auth: SectionAuthorityProvider,
-        src_key: bls::PublicKey,
+        _section_auth: SectionAuthorityProvider,
+        _src_key: bls::PublicKey,
     ) -> Result<Vec<Command>> {
-        let mut commands = vec![];
+        let commands = vec![];
 
-        if !self.network.has_key(&src_key) {
-            commands.extend(self.propose(Proposal::TheirKey {
-                prefix: section_auth.prefix,
-                key: src_key,
-            })?);
-        } else {
-            trace!(
-                "Ignore not new section key of {:?}: {:?}",
-                section_auth,
-                src_key
-            );
-            return Ok(commands);
-        }
+        // if !self.network.has_key(&src_key) {
+        //     commands.extend(self.propose(Proposal::TheirKey {
+        //         prefix: section_auth.prefix,
+        //         key: src_key,
+        //     })?);
+        // } else {
+        //     trace!(
+        //         "Ignore not new section key of {:?}: {:?}",
+        //         section_auth,
+        //         src_key
+        //     );
+        //     return Ok(commands);
+        // }
 
-        commands.extend(self.propose(Proposal::SectionInfo(section_auth))?);
+        // commands.extend(self.propose(Proposal::SectionInfo(section_auth))?);
 
         Ok(commands)
     }
