@@ -274,10 +274,6 @@ impl Core {
                 debug!("Untrusted message from {:?}: {:?} ", sender, msg);
                 commands.push(self.handle_untrusted_message(sender, msg, dest_info)?);
             }
-            MessageStatus::Unknown => {
-                debug!("Unknown message from {:?}: {:?} ", sender, msg);
-                commands.push(self.handle_unknown_message(sender, msg.to_bytes())?);
-            }
             MessageStatus::Useless => {
                 debug!("Useless message from {:?}: {:?}", sender, msg);
             }
@@ -687,14 +683,14 @@ impl Core {
         match msg.variant() {
             Variant::SectionKnowledge { .. } | Variant::ConnectivityComplaint(_) => {
                 if !self.is_elder() {
-                    return Ok(MessageStatus::Unknown);
+                    return Ok(MessageStatus::Useless);
                 }
             }
             Variant::UserMessage(_) => {
                 // If elder, always handle UserMessage, otherwise
                 // handle it only if addressed directly to us as a node.
                 if !self.is_elder() && *msg.dst() != DstLocation::Node(self.node.name()) {
-                    return Ok(MessageStatus::Unknown);
+                    return Ok(MessageStatus::Useless);
                 }
             }
             Variant::JoinRequest(req) => {
@@ -981,7 +977,7 @@ impl Core {
                 {
                     None
                 } else {
-                    Some(MessageStatus::Unknown)
+                    Some(MessageStatus::Untrusted)
                 }
             }
         }
@@ -1000,10 +996,8 @@ impl Core {
             // `Relocate` message.
             if !self.is_elder() || self.section.is_elder(&promise.name) {
                 // If we are not elder, maybe we just haven't processed our promotion yet.
-                // If they are still elder, maybe we just haven't processed their demotion yet.
-                //
-                // In both cases, bounce the message and try again on resend (if any).
-                return Some(MessageStatus::Unknown);
+                // If otherwise they are still elder, maybe we just haven't processed their demotion yet.
+                return Some(MessageStatus::Useless);
             }
         }
 
@@ -1062,51 +1056,6 @@ impl Core {
         };
 
         Ok(cmd)
-    }
-
-    /// Handle message that is "unknown" because we are not in the correct state (e.g. we are adult
-    /// and the message is for elders). We bounce the message to our elders who have more
-    /// information to decide what to do with it.
-    fn handle_unknown_message(
-        &self,
-        sender: Option<SocketAddr>,
-        msg_bytes: Bytes,
-    ) -> Result<Command> {
-        let src_key = *self.section.chain().last_key();
-        let bounce_msg = Message::single_src(
-            &self.node,
-            DstLocation::Direct,
-            Variant::BouncedUnknownMessage {
-                src_key,
-                message: msg_bytes,
-            },
-            None,
-        )?;
-        let bounce_msg = bounce_msg.to_bytes();
-
-        // If the message came from one of our elders then bounce it only to them to avoid message
-        // explosion.
-        let our_elder_sender = sender.filter(|sender| {
-            self.section
-                .elders_info()
-                .peers()
-                .any(|peer| peer.addr() == sender)
-        });
-
-        let dest_info = DestInfo {
-            dest: self.section.prefix().name(),
-            dest_section_pk: src_key,
-        };
-
-        if let Some(sender) = our_elder_sender {
-            Ok(Command::send_message_to_node(
-                (sender, self.section.prefix().name()),
-                bounce_msg,
-                dest_info,
-            ))
-        } else {
-            Ok(self.send_message_to_our_elders(bounce_msg))
-        }
     }
 
     fn handle_bounced_untrusted_message(
