@@ -691,12 +691,17 @@ impl Core {
                 }
             }
             Variant::UserMessage(_) => {
-                if !self.should_handle_user_message(msg.dst()) {
+                // If elder, always handle UserMessage, otherwise
+                // handle it only if addressed directly to us as a node.
+                if !self.is_elder() && *msg.dst() != DstLocation::Node(self.node.name()) {
                     return Ok(MessageStatus::Unknown);
                 }
             }
             Variant::JoinRequest(req) => {
-                if !self.should_handle_join_request(req) {
+                // Ignore `JoinRequest` if we are not elder unless the join request
+                // is outdated in which case we reply with `BootstrapResponse::Join`
+                // with the up-to-date info (see `handle_join_request`).
+                if !self.is_elder() && req.section_key == *self.section.chain().last_key() {
                     // Note: We don't bounce this message because the current bounce-resend
                     // mechanism wouldn't preserve the original SocketAddr which is needed for
                     // properly handling this message.
@@ -946,18 +951,6 @@ impl Core {
         ))
     }
 
-    // Ignore `JoinRequest` if we are not elder unless the join request is outdated in which case we
-    // reply with `BootstrapResponse::Join` with the up-to-date info (see `handle_join_request`).
-    fn should_handle_join_request(&self, req: &JoinRequest) -> bool {
-        self.is_elder() || req.section_key != *self.section.chain().last_key()
-    }
-
-    // If elder, always handle UserMessage, otherwise handle it only if addressed directly to us
-    // as a node.
-    fn should_handle_user_message(&self, dst: &DstLocation) -> bool {
-        self.is_elder() || dst == &DstLocation::Node(self.node.name())
-    }
-
     // Decide how to handle a `Propose` message.
     fn decide_propose_status(
         &self,
@@ -1035,21 +1028,22 @@ impl Core {
         }
     }
 
-    /// Handle message whose trust we can't establish because its proof contains only keys we don't
-    /// know.
+    // Handle message whose trust we can't establish because its proof
+    // contains only keys we don't know.
     fn handle_untrusted_message(
         &self,
         sender: Option<SocketAddr>,
         msg: Message,
         received_dest_info: DestInfo,
     ) -> Result<Command> {
-        let src_name = msg.src().name();
+        let dest = msg.src().name();
+        let dest_section_pk = *self.section_key_by_name(&dest);
 
-        let bounce_dst_key = *self.section_key_by_name(&src_name);
         let dest_info = DestInfo {
-            dest: src_name,
-            dest_section_pk: bounce_dst_key,
+            dest,
+            dest_section_pk,
         };
+
         let bounce_msg = Message::single_src(
             &self.node,
             DstLocation::Direct,
@@ -1059,17 +1053,15 @@ impl Core {
             },
             None,
         )?;
-        let bounce_msg = bounce_msg.to_bytes();
+        let bounce_msg_bytes = bounce_msg.to_bytes();
 
-        if let Some(sender) = sender {
-            Ok(Command::send_message_to_node(
-                (sender, src_name),
-                bounce_msg,
-                dest_info,
-            ))
+        let cmd = if let Some(sender_addr) = sender {
+            Command::send_message_to_node((sender_addr, dest), bounce_msg_bytes, dest_info)
         } else {
-            Ok(self.send_message_to_our_elders(bounce_msg))
-        }
+            self.send_message_to_our_elders(bounce_msg_bytes)
+        };
+
+        Ok(cmd)
     }
 
     /// Handle message that is "unknown" because we are not in the correct state (e.g. we are adult
