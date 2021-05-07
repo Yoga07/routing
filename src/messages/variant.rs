@@ -6,7 +6,7 @@
 // KIND, either express or implied. Please review the Licences for the specific language governing
 // permissions and limitations relating to use of the SAFE Network Software.
 
-use super::{Message, MessageHash, VerifyStatus};
+use super::{Message, VerifyStatus};
 use crate::{
     agreement::{DkgFailureProof, DkgFailureProofSet, DkgKey, ProofShare, Proposal, Proven},
     crypto::Signature,
@@ -77,14 +77,6 @@ pub(crate) enum Variant {
     BouncedUntrustedMessage {
         msg: Box<Message>,
         dest_info: DestInfo,
-    },
-    /// Sent from a node that doesn't know how to handle `message` to its elders in order for them
-    /// to decide what to do with it (resend with more info or discard).
-    BouncedUnknownMessage {
-        /// The last section key of the sender.
-        src_key: bls::PublicKey,
-        /// The serialized original message.
-        message: Bytes,
     },
     /// Sent to the new elder candidates to start the DKG process.
     DkgStart {
@@ -216,11 +208,6 @@ impl Debug for Variant {
                 .debug_struct("BouncedUntrustedMessage")
                 .field("message", msg)
                 .field("dest_info", dest_info)
-                .finish(),
-            Self::BouncedUnknownMessage { src_key, message } => f
-                .debug_struct("BouncedUnknownMessage")
-                .field("src_key", src_key)
-                .field("message_hash", &MessageHash::from_bytes(message))
                 .finish(),
             Self::DkgStart {
                 dkg_key,

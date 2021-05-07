@@ -23,8 +23,8 @@ use crate::{
     event::{Event, NodeElderChange},
     message_filter::MessageFilter,
     messages::{
-        JoinRequest, Message, MessageHash, MessageStatus, PlainMessage, ResourceProofResponse,
-        SrcAuthority, Variant, VerifyStatus,
+        JoinRequest, Message, MessageStatus, PlainMessage, ResourceProofResponse, SrcAuthority,
+        Variant, VerifyStatus,
     },
     network::Network,
     node::Node,
@@ -739,7 +739,6 @@ impl Core {
             }
             Variant::Relocate(_)
             | Variant::BouncedUntrustedMessage { .. }
-            | Variant::BouncedUnknownMessage { .. }
             | Variant::DkgMessage { .. }
             | Variant::DkgFailureObservation { .. }
             | Variant::DkgFailureAgreement { .. }
@@ -850,14 +849,6 @@ impl Core {
                 )?])
             }
             Variant::DstAhead(_chain) => Ok(vec![]),
-            Variant::BouncedUnknownMessage { src_key, message } => {
-                let sender = sender.ok_or(Error::InvalidSrcLocation)?;
-                self.handle_bounced_unknown_message(
-                    msg.src().peer(sender)?,
-                    message.clone(),
-                    src_key,
-                )
-            }
             Variant::DkgStart {
                 dkg_key,
                 elders_info,
@@ -1108,55 +1099,6 @@ impl Core {
             resend_msg.to_bytes(),
             dest_info,
         ))
-    }
-
-    fn handle_bounced_unknown_message(
-        &self,
-        sender: Peer,
-        bounced_msg_bytes: Bytes,
-        sender_last_key: &bls::PublicKey,
-    ) -> Result<Vec<Command>> {
-        let span = trace_span!(
-            "Received BouncedUnknownMessage",
-            bounced_msg_hash=?MessageHash::from_bytes(&bounced_msg_bytes),
-            %sender
-        );
-        let _span_guard = span.enter();
-
-        if !self.section.prefix().matches(sender.name()) {
-            trace!("peer is not from our section, discarding");
-            return Ok(vec![]);
-        }
-
-        if !self.section.chain().has_key(sender_last_key)
-            || sender_last_key == self.section.chain().last_key()
-        {
-            trace!("peer is up to date or ahead of us, discarding");
-            return Ok(vec![]);
-        }
-
-        trace!("peer is lagging behind, resending with Sync",);
-        // First send Sync to update the peer, then resend the message itself. If the messages
-        // arrive in the same order they were sent, the Sync should update the peer so it will then
-        // be able to handle the resent message. If not, the peer will bounce the message again.
-        Ok(vec![
-            self.send_direct_message(
-                (*sender.addr(), *sender.name()),
-                Variant::Sync {
-                    section: self.section.clone(),
-                    network: self.network.clone(),
-                },
-                *self.section.chain().last_key(),
-            )?,
-            Command::send_message_to_node(
-                (*sender.addr(), *sender.name()),
-                bounced_msg_bytes,
-                DestInfo {
-                    dest: *sender.name(),
-                    dest_section_pk: *sender_last_key,
-                },
-            ),
-        ])
     }
 
     fn handle_user_message(&mut self, msg: &Message, content: Bytes) -> Result<Vec<Command>> {
