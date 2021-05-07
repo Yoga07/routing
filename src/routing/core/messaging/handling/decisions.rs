@@ -74,7 +74,7 @@ impl Core {
                 }
             }
             Variant::Relocate(_)
-            | Variant::BouncedUntrustedMessage(_)
+            | Variant::BouncedUntrustedMessage { .. }
             | Variant::BouncedUnknownMessage { .. }
             | Variant::DkgMessage { .. }
             | Variant::DkgFailureObservation { .. }

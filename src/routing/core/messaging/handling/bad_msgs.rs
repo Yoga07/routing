@@ -16,7 +16,7 @@ use crate::{
     Error, Result,
 };
 use bytes::Bytes;
-use sn_messaging::DstLocation;
+use sn_messaging::{DestInfo, DstLocation};
 
 // Bad msgs
 impl Core {
@@ -26,20 +26,31 @@ impl Core {
         &self,
         sender: Option<SocketAddr>,
         msg: Message,
+        received_dest_info: DestInfo,
     ) -> Result<Command> {
         let src_name = msg.src().name();
         let bounce_dst_key = *self.section_key_by_name(&src_name);
+        let dest_info = DestInfo {
+            dest: src_name,
+            dest_section_pk: bounce_dst_key,
+        };
         let bounce_msg = Message::single_src(
             &self.node,
             DstLocation::Direct,
-            Variant::BouncedUntrustedMessage(Box::new(msg)),
+            Variant::BouncedUntrustedMessage {
+                msg: Box::new(msg),
+                dest_info: received_dest_info,
+            },
             None,
-            Some(bounce_dst_key),
         )?;
         let bounce_msg = bounce_msg.to_bytes();
 
         if let Some(sender) = sender {
-            Ok(Command::send_message_to_node(&sender, bounce_msg))
+            Ok(Command::send_message_to_node(
+                (sender, src_name),
+                bounce_msg,
+                dest_info,
+            ))
         } else {
             Ok(self.send_message_to_our_elders(bounce_msg))
         }
@@ -53,14 +64,14 @@ impl Core {
         sender: Option<SocketAddr>,
         msg_bytes: Bytes,
     ) -> Result<Command> {
+        let src_key = *self.section.chain().last_key();
         let bounce_msg = Message::single_src(
             &self.node,
             DstLocation::Direct,
             Variant::BouncedUnknownMessage {
-                src_key: *self.section.chain().last_key(),
+                src_key,
                 message: msg_bytes,
             },
-            None,
             None,
         )?;
         let bounce_msg = bounce_msg.to_bytes();
@@ -74,8 +85,17 @@ impl Core {
                 .any(|peer| peer.addr() == sender)
         });
 
+        let dest_info = DestInfo {
+            dest: self.section.prefix().name(),
+            dest_section_pk: src_key,
+        };
+
         if let Some(sender) = our_elder_sender {
-            Ok(Command::send_message_to_node(&sender, bounce_msg))
+            Ok(Command::send_message_to_node(
+                (sender, self.section.prefix().name()),
+                bounce_msg,
+                dest_info,
+            ))
         } else {
             Ok(self.send_message_to_our_elders(bounce_msg))
         }
@@ -84,16 +104,11 @@ impl Core {
     pub(crate) fn handle_bounced_untrusted_message(
         &self,
         sender: Peer,
-        dst_key: Option<bls::PublicKey>,
+        dst_key: bls::PublicKey,
         bounced_msg: Message,
     ) -> Result<Command> {
         let span = trace_span!("Received BouncedUntrustedMessage", ?bounced_msg, %sender);
         let _span_guard = span.enter();
-
-        let dst_key = dst_key.ok_or_else(|| {
-            error!("missing dst key");
-            Error::InvalidMessage
-        })?;
 
         let resend_msg = match bounced_msg.variant() {
             Variant::Sync { section, network } => {
@@ -116,7 +131,6 @@ impl Core {
                         network: network.clone(),
                     },
                     None,
-                    None,
                 )?
             }
             _ => bounced_msg
@@ -127,10 +141,15 @@ impl Core {
                 })?,
         };
 
+        let dest_info = DestInfo {
+            dest: *sender.name(),
+            dest_section_pk: dst_key,
+        };
         trace!("resending with extended proof");
         Ok(Command::send_message_to_node(
-            sender.addr(),
+            (*sender.addr(), *sender.name()),
             resend_msg.to_bytes(),
+            dest_info,
         ))
     }
 
@@ -165,13 +184,21 @@ impl Core {
         // be able to handle the resent message. If not, the peer will bounce the message again.
         Ok(vec![
             self.send_direct_message(
-                sender.addr(),
+                (*sender.addr(), *sender.name()),
                 Variant::Sync {
                     section: self.section.clone(),
                     network: self.network.clone(),
                 },
+                *self.section.chain().last_key(),
             )?,
-            Command::send_message_to_node(sender.addr(), bounced_msg_bytes),
+            Command::send_message_to_node(
+                (*sender.addr(), *sender.name()),
+                bounced_msg_bytes,
+                DestInfo {
+                    dest: *sender.name(),
+                    dest_section_pk: *sender_last_key,
+                },
+            ),
         ])
     }
 }
