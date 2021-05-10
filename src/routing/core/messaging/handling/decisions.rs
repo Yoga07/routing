@@ -80,7 +80,6 @@ impl Core {
             | Variant::DkgFailureObservation { .. }
             | Variant::DkgFailureAgreement { .. }
             | Variant::SrcAhead { .. }
-            | Variant::DstAhead(_)
             | Variant::ResourceChallenge { .. } => {}
         }
 
