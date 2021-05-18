@@ -115,6 +115,11 @@ impl Core {
             return Ok((vec![], true));
         }
 
+        if msg.skip_anti_entropy() {
+            // We pass sync and Dkg messages without any AE checks
+            return Ok((vec![], true));
+        }
+
         let (actions, can_be_executed) = anti_entropy::process(
             &self.node,
             &self.section,

@@ -357,6 +357,19 @@ impl Message {
         self.proof_chain().map(|proof_chain| proof_chain.last_key())
     }
 
+    /// Returns `true` this message can skip AE checks.
+    /// This is required for Sync and DKG messages.
+    pub(crate) fn skip_anti_entropy(&self) -> bool {
+        match self.variant {
+            Variant::Sync { .. }
+            | Variant::DkgStart { .. }
+            | Variant::DkgMessage { .. }
+            | Variant::DkgFailureObservation { .. }
+            | Variant::DkgFailureAgreement(_) => true,
+            _ => false,
+        }
+    }
+
     // Extend the current message proof chain so it starts at `new_first_key` while keeping the
     // last key (and therefore the signature) intact.
     // NOTE: This operation doesn't invalidate the signatures because the proof chain is not part of
